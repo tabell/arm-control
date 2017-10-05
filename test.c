@@ -39,15 +39,18 @@ int nodeCreate(const char* path, tNode** node)
     char sysPath[PATH_MAX];
     snprintf(sysPath, PATH_MAX, "%s%s/%s",
             PATH_ROOT, path, "angle");
-    newnode->fd = open(sysPath, O_APPEND);
+    newnode->fd = open(sysPath, O_RDWR);
     if (-1 == newnode->fd) {
         printf("Error %d opening %s: %s\n",
             errno, sysPath, strerror(errno));
         ret = errno;
+        free(newnode);
     } else {
+        printf("opened new fd %d for %s\n", newnode->fd, sysPath);
         newnode->name = path;
         *node = newnode;
     }
+
 
     return ret;
 }
@@ -83,11 +86,19 @@ int nodeSet(tNode* node, int angle)
     ssize_t nWritten;
     int ret = 0;
 
-    if (0 > (ret = snprintf(strAngle, 32, "%d", angle))) {
-        printf("sprintf error %d: %s\n", ret, strerror(-ret));
+    if (0 > (snprintf(strAngle, 32, "%d", angle))) {
+        printf("sprintf error %d: %s\n", errno, strerror(errno));
     } else {
-        nWritten = write(node->fd, strAngle, ret);
-        node->angle = angle;
+        if (0 > lseek(node->fd, 0, SEEK_SET)) {
+            printf("error %d seeking fd %d: %s\n",
+                    errno, node->fd, strerror(errno));
+        } else if (0 > (nWritten = write(node->fd, strAngle, ret))) {
+            printf("error %d writing %s to fd %d: %s\n",
+                    errno, strAngle, node->fd, strerror(errno));
+            ret = -errno;
+        } else {
+            node->angle = angle;
+        }
     }
 
     return ret;
@@ -99,7 +110,7 @@ int nodeDestroy(tNode **node)
 
     close((*node)->fd);
 
-    free(*node);
+    if (*node) free(*node);
     *node = NULL;
 
     return 0;
@@ -112,18 +123,26 @@ int main(int argc, char *argv[])
     int angle;
     tNode* node[5];
 
-    while (paths[i] != NULL)
+    for (i = 0; i < 5; i++)
     {
-
+        node[i] = NULL;
         if (0 != (ret = nodeCreate(paths[i], &node[i]))) {
             printf("Error %d creating node %i: %s\n", ret, i, strerror(-ret));
-        } else {
-            if (0 != (ret = (nodeGet(node[i], &angle)))) {
-                printf("Error %d getting angle from node %i: %s\n", ret, i, strerror(-ret));
-            } else printf("%s : %d\n", paths[i], angle);
-            nodeDestroy(&node[i]);
         }
-        i++;
+    }
+    for (i = 0; i < 5; i++)
+    {
+        if (0 != (ret = (nodeGet(node[i], &angle)))) {
+            printf("Error %d getting angle from node %i: %s\n", ret, i, strerror(-ret));
+        } else if (0 != (ret = (nodeSet(node[i], angle)))) {
+            printf("Error %d setting angle for node %i: %s\n", ret, i, strerror(-ret));
+        } else if (0 != (ret = (nodeGet(node[i], &angle)))) {
+            printf("Error %d getting angle from node %i: %s\n", ret, i, strerror(-ret));
+        } else {
+            printf("%s : %d\n", paths[i], angle);
+        }
+
+        nodeDestroy(&node[i]);
     }
 
     return 0;
