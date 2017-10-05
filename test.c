@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
+#include <limits.h>
 
 #define PATH_ROOT "/sys/devices/platform/"
 
@@ -15,14 +16,15 @@
 typedef struct node {
     int fd;
     uint8_t angle;
-	const char* path;
+	const char* name;
 } tNode;
 
-const char *paths[] = { "base",
-    "shoulder",
-    "elbow",
-    "wrist1",
-    "wrist2",
+const char *paths[] = {
+   "base",
+   "shoulder",
+   "elbow",
+   "wrist1",
+   "wrist2",
     NULL };
 
 int nodeCreate(const char* path, tNode** node)
@@ -32,11 +34,22 @@ int nodeCreate(const char* path, tNode** node)
     tNode *newnode = calloc(1, sizeof(tNode));
     if (!newnode) return -ENOMEM;
 
-    newnode->path = path;
+    int ret = 0;
 
-    *node = newnode;
+    char sysPath[PATH_MAX];
+    snprintf(sysPath, PATH_MAX, "%s%s/%s",
+            PATH_ROOT, path, "angle");
+    newnode->fd = open(sysPath, O_APPEND);
+    if (-1 == newnode->fd) {
+        printf("Error %d opening %s: %s\n",
+            errno, sysPath, strerror(errno));
+        ret = errno;
+    } else {
+        newnode->name = path;
+        *node = newnode;
+    }
 
-    return 0;
+    return ret;
 }
 
 int nodeGet(tNode* node, int *angle)
@@ -48,19 +61,16 @@ int nodeGet(tNode* node, int *angle)
     int ret = 0;
     int newAngle;
 
-    node->fd = open(node->path, O_APPEND);
-    if (-1 == node->fd) {
-        printf("Error %d opening %s: %s\n",
-            node->fd, node->path, strerror(node->fd));
-    } else if (0 > (nRead = read(node->fd, strAngle, sizeof(strAngle)))) {
-        printf("Error %d reading from %s: %s\n", newAngle, node->path, strerror(-newAngle));
+
+    if (0 > (nRead = read(node->fd, strAngle, sizeof(strAngle)))) {
+        printf("Error %d reading from %s: %s\n", errno, node->name, strerror(errno));
+        ret = errno;
     } else if (0 > (newAngle = strtoul(strAngle, NULL, 10))) {
         printf("Error %d converting %s: %s\n", newAngle, strAngle, strerror(-newAngle));
         ret = newAngle;
     } else {
         *angle = newAngle;
     }
-    close(node->fd);
 
     return ret;
 
@@ -73,18 +83,11 @@ int nodeSet(tNode* node, int angle)
     ssize_t nWritten;
     int ret = 0;
 
-    node->fd = open(node->path, O_APPEND);
-    if (-1 == node->fd) {
-        printf("Error %d opening %s: %s\n",
-            node->fd, node->path, strerror(node->fd));
+    if (0 > (ret = snprintf(strAngle, 32, "%d", angle))) {
+        printf("sprintf error %d: %s\n", ret, strerror(-ret));
     } else {
-        if (0 > (ret = snprintf(strAngle, 32, "%d", angle))) {
-            printf("sprintf error %d: %s\n", ret, strerror(-ret));
-        } else {
-            nWritten = write(node->fd, strAngle, ret);
-            node->angle = angle;
-        }
-        close(node->fd);
+        nWritten = write(node->fd, strAngle, ret);
+        node->angle = angle;
     }
 
     return ret;
@@ -93,6 +96,8 @@ int nodeSet(tNode* node, int angle)
 int nodeDestroy(tNode **node)
 {
     if (!node) return -EINVAL;
+
+    close((*node)->fd);
 
     free(*node);
     *node = NULL;
@@ -112,12 +117,13 @@ int main(int argc, char *argv[])
 
         if (0 != (ret = nodeCreate(paths[i], &node[i]))) {
             printf("Error %d creating node %i: %s\n", ret, i, strerror(-ret));
-        } else if (0 != (ret = (nodeGet(node[i], &angle)))) {
-            printf("Error %d getting angle from node %i: %s\n", ret, i, strerror(-ret));
-        } else if (0 > printf("%s : %d\n", paths[i], angle)) {
         } else {
+            if (0 != (ret = (nodeGet(node[i], &angle)))) {
+                printf("Error %d getting angle from node %i: %s\n", ret, i, strerror(-ret));
+            } else printf("%s : %d\n", paths[i], angle);
             nodeDestroy(&node[i]);
         }
+        i++;
     }
 
     return 0;
