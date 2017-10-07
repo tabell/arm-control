@@ -1,2 +1,2 @@
-run: test.c
-	gcc -o run test.c
+run: run.c
+	gcc -o run run.c
