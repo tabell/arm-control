@@ -120,6 +120,8 @@ int main(int argc, char *argv[])
         } else {
             if (0 != (ret = (nodeGet(node[i], &angle)))) {
                 printf("Error %d getting angle from node %i: %s\n", ret, i, strerror(-ret));
+            } else if (0 != (ret = (nodeSet(node[i], angle)))) {
+                printf("Error %d setting angle for node %i: %s\n", ret, i, strerror(-ret));
             } else printf("%s : %d\n", paths[i], angle);
             nodeDestroy(&node[i]);
         }
