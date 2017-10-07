@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -23,11 +24,15 @@ int main() {
         fprintf(stderr,"opened fd %d for %s\n",
                 fd, path);
 
-        int bytes = write(fd, str, 3);
-        if (bytes == -1) {
-            fprintf(stderr, "write returns %d: %s\n", errno, strerror(errno));
+        int angle = -1;
+        //int angle[5] = { -1, -1, -1, -1, -1 };
+
+        int ret = ioctl(fd, SERVO_IOC_GET_ANGLE, &angle);
+
+        if (ret != 0) {
+            fprintf(stderr, "ioctl returns %d: %s\n", errno, strerror(errno));
         } else {
-            fprintf(stderr, "wrote %d bytes\n", bytes);
+            fprintf(stderr, "success: angle = %d\n", angle);
         }
 
 
