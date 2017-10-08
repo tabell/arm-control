@@ -6,6 +6,9 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <stdbool.h>
+#include <poll.h>
+#include <termios.h>
 
 #include "pwm-servo.h"
 
@@ -92,6 +95,13 @@ void printState(
 
 int main() {
     const char *path = "/dev/pwm-servo";
+    bool running = true;
+    struct pollfd pf[1];
+    char inbuf[4096] = {0};
+    ssize_t nread;
+    int i;
+    struct termios term, oldterm;
+
     fprintf(stderr, "trying to open %s\n", path);
     int fd = open(path,
             O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC,
@@ -104,16 +114,54 @@ int main() {
 
         int x;
 
+        tcgetattr(fileno(stdin), &term);
+        tcgetattr(fileno(stdin), &oldterm);
+        cfmakeraw(&term);
+        tcsetattr(fileno(stdin), 0, &term);
 
-        state[2].enabled = 1;
-        for (x = 70; x < 130; x++) {
-            usleep(10000);
-            state[2].angle = x; 
+
+        state[0].enabled = true;
+        state[0].angle = 90;
+        setState(fd, state);
+
+        while (running) {
+            usleep(1000);
+            pf[0].fd  =  fileno(stdin);
+            pf[0].events = POLLIN;
+            poll(pf, 1, 0);
+            if (pf[0].revents & POLLIN) {
+                nread = read(fileno(stdin), inbuf, 4096);
+                if (nread > 0) {
+                    for (i = 0; i < nread; i++) {
+                        switch(inbuf[i]) {
+                            case 3:
+                            case 27:
+                                running = false;
+                                tcsetattr(fileno(stdin), 0, &oldterm);
+
+                                
+                                
+                                break;
+                            case 'q':
+                                state[0].angle += 1;
+                                break;
+                            case 'a':
+                                state[0].angle -= 1;
+                                break;
+                            default:
+                                break;
+                        }
+                    }
+                }
+            }
 
             setState(fd, state);
-
-            printState(state);
         }
+
+        disableAll(fd, state);
+        setState(fd, state);
+
+        printState(state);
 
         close(fd);
     }
