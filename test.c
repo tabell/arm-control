@@ -1,4 +1,3 @@
-#define _LARGEFILE64_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,7 +14,7 @@ int main() {
     const char *path = "/dev/pwm-servo";
     fprintf(stderr, "trying to open %s\n", path);
     int fd = open(path,
-            O_WRONLY|O_CREAT|O_TRUNC|O_LARGEFILE|O_CLOEXEC,
+            O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC,
             S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH);
     if (fd < 0) {
         fprintf(stderr, "Error %d opening %s: %s\n",
@@ -47,7 +46,6 @@ int main() {
         state[3].enabled = 1;
         state[4].enabled = 1;
         state[5].enabled = 1;
-
 
         ret = ioctl(fd, SERVO_IOC_SET_STATE, &state);
 
