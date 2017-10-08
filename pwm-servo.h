@@ -13,9 +13,9 @@
 
 #define PWM_SERVO_CLASS_NAME "servos"
 
-typedef struct servo_state {
+struct servo_state {
     int angle;
-    bool enabled;
-} tState;
+    int enabled;
+};
 
 #endif /* PWM_SERVO_H */
