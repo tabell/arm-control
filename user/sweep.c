@@ -62,9 +62,9 @@ int servoSync(int index)
 
 }
 int main(int argc, char** argv) {
-    if (argc < 3) {
+    if (argc < 4) {
         fprintf(stderr,
-                "usage: %s <index 1-6> <command: set/get/on/off> [<duty cycle ns>]\n", argv[0]);
+                "usage: %s <index 1-6> <min duty> <max duty> <time>\n", argv[0]);
         return 0;
     }
 
@@ -78,33 +78,28 @@ int main(int argc, char** argv) {
         return 0;
     }
 
-    tCmd cmd;
+    int duty_start = strtoul(argv[2], NULL, 10);
+    int duty_end = strtoul(argv[3], NULL, 10);
 
-    /* parse command */
-    if (!strcmp(argv[2], "sync")) {
-        cmd = CMD_SYNC;
-        /* turn on */
-    } else if (!strcmp(argv[2], "on")) {
-        cmd = CMD_ON;
-        /* turn on */
-    } else if (!strcmp(argv[2], "off")) {
-        /* turn off */
-        cmd = CMD_OFF;
-    } else if (!strcmp(argv[2], "get")) {
-        /* get duty */
-        cmd = CMD_GET;
+    float duration = strtof(argv[4], NULL);
 
-    } else if (argc < 4) {
-        fprintf(stderr,"that command requires another parameter\n");
-        return 0;
-    } else if (!strcmp(argv[2], "set")) {
-        /* set duty */
-        cmd = CMD_SET;
-    } else {
-        fprintf(stderr,"Unrecognized command\n");
-        return 0;
-    }
+    fprintf(stderr, "sweeping node %d from %d to %d in %f s\n",
+            index, duty_start, duty_end, duration);
+    
+    int num_steps = duration * 100;
+    fprintf(stderr, "num_steps = %d\n", num_steps);
 
+    int duty_delta = duty_end - duty_start;
+    int duty_step = duty_delta / num_steps;
+    fprintf(stderr, "duty: delta = %d step = %d\n", duty_delta, duty_step);
+    float time_delta = (duration * 1E9);
+    int time_step = time_delta  / num_steps;
+    fprintf(stderr, "time: delta = %f ns step = %d ns\n", time_delta, time_step);
+
+    struct timespec delay = {
+        .tv_sec = 0,
+        .tv_nsec = abs(time_step),
+    };
 
     const char *path = "/dev/robot";
 
@@ -119,32 +114,26 @@ int main(int argc, char** argv) {
 
         fprintf(stderr,"opened fd %d for %s\n",
                 fd, path);
+        int duty = duty_start;
+        fprintf(stderr, "start = %d goal = %d step = %d\n",
+                duty, duty_end, duty_step);
 
-        if (cmd == CMD_GET) {
-            int duty = -1;
-            if (0 != (ret = getDuty(index, &duty))) {
-                fprintf(stderr, "Error %d getting duty for id %d: %s\n",
-                        ret, index, strerror(-ret));
-            } else {
-                fprintf(stderr,"id %d returns duty=%d ns\n", index, duty);
-            }
-        } else if (cmd == CMD_SET) {
-            int duty = strtoul(argv[3], NULL, 10);
-            fprintf(stderr, "setting index %d, duty %d\n",
-                    index, duty);
+        fprintf(stderr, "abs(duty - duty_end) = %d, abs(duty_step) = %d\n", abs(duty - duty_end), abs(duty_step));
+        for (duty = duty_start; abs(duty - duty_end) > abs(duty_step); duty += duty_step) {
+            fprintf(stderr, "start = %d current = %d end = %d step = %d\n",
+                    duty_start, duty, duty_end, duty_step);
             if (0 != (ret = setDuty(index, duty))) {
                 fprintf(stderr, "Error %d setting duty %d for id %d: %s\n",
                         ret, duty, index, strerror(-ret));
-            } else {
-                fprintf(stderr,"id %d set duty=%d ns\n", index, duty);
-            }
-        } else if (cmd == CMD_SYNC) {
-            fprintf(stderr, "calling sync index %d\n",
-                    index);
-            if (0 != (ret = servoSync(index))) {
+            } else if (0 != (ret = servoSync(index))) {
                 fprintf(stderr, "Error %d syncing for id %d: %s\n",
                         ret, index, strerror(-ret));
+            } else if (0 != (ret = nanosleep(&delay, NULL))) {
+                fprintf(stderr, "error %d calling nanosleep: %s\n",
+                        ret, strerror(-ret));
             }
+
+            if (!ret) break;
         }
 
 
@@ -152,5 +141,6 @@ int main(int argc, char** argv) {
         close(fd);
     }
 
+    fprintf(stderr, "clean exit\n");
     return 0;
 }
