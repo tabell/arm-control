@@ -1,23 +1,26 @@
-#ifndef PWM_SERVO_H
-#define PWM_SERVO_H
+#ifndef SERVO_H
+#define SERVO_H
 
-#define PWM_SERVO_DEVICE_NAME "servo"
+#define SERVO_DEVICE_NAME "robot"
+#define SERVO_DRIVER_NAME "servo"
 
 #define SERVO_IOC_SET_DUTY
 
 #define SERVO_IOC_MAGIC 'Q'
 #define SERVO_IOC_RESET     _IO(SERVO_IOC_MAGIC, 0)
-#define SERVO_IOC_SET_STATE _IOW(SERVO_IOC_MAGIC, 1, void*)
-#define SERVO_IOC_GET_STATE _IOR(SERVO_IOC_MAGIC, 2, void*)
+#define SERVO_IOC_SET_DUTY_NS _IOW(SERVO_IOC_MAGIC, 1, void*)
+#define SERVO_IOC_GET_DUTY_NS _IOR(SERVO_IOC_MAGIC, 2, void*)
+#define SERVO_IOC_ENABLE _IOW(SERVO_IOC_MAGIC, 3, int)
+#define SERVO_IOC_DISABLE _IOW(SERVO_IOC_MAGIC, 4, int)
+#define SERVO_IOC_SYNC _IO(SERVO_IOC_MAGIC, 5)
 #define SERVO_IOC_MAX 8
 
 #define SERVO_MAJ 0
 
-#define PWM_SERVO_CLASS_NAME "servo"
+#define SERVO_CLASS_NAME "servo"
 
-struct servo_state {
-    int angle;
-    int enabled;
-};
+#define SERVO_PWM_PERIOD 20000000
 
-#endif /* PWM_SERVO_H */
+#define TOTAL_NODES 6
+
+#endif /* SERVO_H */
