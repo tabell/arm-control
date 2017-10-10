@@ -6,12 +6,17 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <unistd.h>
 
-#include "pwm-servo.h"
+#include "servo.h"
 
-
-int main() {
-    const char *path = "/dev/pwm-servo";
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        fprintf(stderr,
+                "usage: %s <index 1-6> <command: set/get/on/off> [<duty cycle ns>]\n", argv[0]);
+        return 0;
+    }
+    const char *path = "/dev/robot";
     fprintf(stderr, "trying to open %s\n", path);
     int fd = open(path,
             O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC,
@@ -24,8 +29,7 @@ int main() {
                 fd, path);
 
         //int angle[5] = { -1, -1, -1, -1, -1 };
-        struct servo_state state[6];
-
+#if 0
         int ret = ioctl(fd, SERVO_IOC_GET_STATE, &state);
 
         if (ret != 0) {
@@ -60,6 +64,7 @@ int main() {
                     state[4].enabled ? state[4].angle : -1,
                     state[5].enabled ? state[5].angle : -1);
         }
+#endif
         close(fd);
     }
     return 0;
