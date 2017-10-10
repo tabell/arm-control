@@ -23,4 +23,9 @@
 
 #define TOTAL_NODES 6
 
+struct servo_ioctl_pkt {
+	int idx;
+	int duty_ns;
+};
+
 #endif /* SERVO_H */
