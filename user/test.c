@@ -10,6 +10,7 @@
 
 #include "servo.h"
 
+
 int main(int argc, char** argv) {
     if (argc < 2) {
         fprintf(stderr,
@@ -17,6 +18,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     const char *path = "/dev/robot";
+
     fprintf(stderr, "trying to open %s\n", path);
     int fd = open(path,
             O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC,
@@ -25,6 +27,7 @@ int main(int argc, char** argv) {
         fprintf(stderr, "Error %d opening %s: %s\n",
                 fd, path, strerror(fd));
     } else {
+
         fprintf(stderr,"opened fd %d for %s\n",
                 fd, path);
 
@@ -44,8 +47,7 @@ int main(int argc, char** argv) {
                     state[5].enabled ? state[5].angle : -1);
         }
 
-        state[0].enabled = 1;
-        state[1].enabled = 1;
+
         state[2].enabled = 1;
         state[3].enabled = 1;
         state[4].enabled = 1;
@@ -65,7 +67,9 @@ int main(int argc, char** argv) {
                     state[5].enabled ? state[5].angle : -1);
         }
 #endif
+
         close(fd);
     }
+
     return 0;
 }
