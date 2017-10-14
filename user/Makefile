@@ -1,2 +1,2 @@
-test: test.c
-	gcc -o test test.c
+sweep: sweep.c
+	gcc -o sweep sweep.c -ggdb
