@@ -1,2 +1,2 @@
 sweep: sweep.c
-	gcc -o sweep sweep.c -ggdb -lm
+	gcc -std=gnu11 -o sweep sweep.c -ggdb -lm
