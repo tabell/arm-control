@@ -20,7 +20,12 @@
 
 //#define DRY_RUN
 //#define DEBUG_PRINT
-#define  DUTY_STEP 4000
+
+#define TIMESPEC_COPY(dest,src) do { \
+    dest.tv_sec = src.tv_sec; \
+    dest.tv_nsec = src.tv_nsec; } while(0);
+
+#define SPEED_NORMAL 524288
 
 int fd = -1;
 const char *path = "/dev/robot";
@@ -31,7 +36,8 @@ typedef struct path {
     int start_duty;
     int target_duty;
     float progress;
-    float progress_step;
+    float last_progress;
+    float progress_unit;
     int num_steps;
     tPathFunc path_func; 
 } tPath;
@@ -120,36 +126,9 @@ int calcNextDuty(tNode* node)
     } else {
         step = delta * node->path->path_func(node->path->progress);
     }
-    node->last_duty = node->duty;
     node->duty = base + step;
-    //pr( "diff = %d", node->duty - node->last_duty);
     return 0;
 }
-#if 0
-int setAllDuty(tNode *nodes[], float progress)
-{
-
-    int ret = 0;
-    int i;
-    for (i = 0; i < 6; i++) {
-        if (!nodes[i]) {
-            pr("error node %d null", i);
-            return -EINVAL;
-        }
-        nodes[i]->path->progress = progress;
-        if (0 != (ret = calcNextDuty(nodes[i]))) {
-            pr("Error %d setting node %d: %s",
-                    -ret, i, strerror(-ret));
-            break;
-        } else if (0 != (ret = setDuty(nodes[i]))) {
-            pr("Error %d setting node %d: %s",
-                    -ret, i, strerror(-ret));
-            break;
-        }
-    }
-    return ret;
-}
-#endif
 
 int setDuty(tNode* node)
 {
@@ -203,10 +182,9 @@ int servoSync(tNode* node)
 int setPath(
         tPath** pPath,
         int start_duty,
-        int duty_goal,
-        struct timespec *frameDelay)
+        int duty_goal)
 {
-    if (!path || !frameDelay) return -EINVAL;
+    if (!path) return -EINVAL;
     tPath *path = NULL;
     if (NULL == (path = malloc(sizeof(tPath)))) {
         pr( "couldn't allocate memory for path struct");
@@ -215,11 +193,9 @@ int setPath(
 
     path->start_duty = start_duty;
     path->target_duty = duty_goal;
-    path->progress_step = fabs((float)DUTY_STEP / (float)(duty_goal - start_duty));
 
-    frameDelay->tv_nsec = 5222222;
-    //tPath path = { duty_start, duty_goal, 0, NULL };
-
+    float duration = fabs((float)(duty_goal - start_duty)) * 1600;
+    path->progress_unit = 1.0f / duration;
 
     path->path_func = gentle2;
 
@@ -246,20 +222,29 @@ int sweep(tNode *node, int duty_end)
     pr("duty_start = %d duty_end = %d",
             node->duty, duty_end);
 
-    struct timespec delay = { 0 };
-
-    if (0 != (ret = setPath(&node->path, node->duty, duty_end, &delay))) {
+    if (0 != (ret = setPath(&node->path, node->duty, duty_end))) {
         pr( "error %d calculating params: %s",
                 ret, strerror(-ret));
         return ret;
     }
+    
 
     int step_count = 0;
-    struct timespec start_time, end_time;
+    struct timespec start_time, end_time, last;
     clock_gettime(CLOCK_REALTIME, &start_time);
+
+    TIMESPEC_COPY(last, start_time);
+    
     do {
+        /* Sync */
+        clock_gettime(CLOCK_REALTIME, &end_time);
+        float tick = clock_delta(last, end_time);
+        //pr("%d: %.2f us: progress = %.2f", step_count, tick / 1E3, node->path->progress);
+        TIMESPEC_COPY(last, end_time);
+
+
         step_count++;
-        node->path->progress += node->path->progress_step;
+        node->path->progress += node->path->progress_unit * tick;
         calcNextDuty(node);
         if (0 != (ret = setDuty(node))) {
             pr( "Error %d setting duty %d for id %d: %s",
@@ -267,14 +252,18 @@ int sweep(tNode *node, int duty_end)
         } else if (0 != (ret = servoSync(node))) {
             pr( "Error %d syncing for id %d: %s",
                     ret, node->index, strerror(-ret));
-        } else if (0 != (ret = nanosleep(&delay, NULL))) {
-            pr( "error %d calling nanosleep s=%d ns=%d: %s",
-                    ret, delay.tv_sec, delay.tv_nsec, strerror(-ret));
         }
 
-        //pr( "duty = %d goal = %d progress = %.2f",
-        //        node->duty, node->path->target_duty, node->path->progress);
-        assert(node->path->target_duty > 0);
+        // pr( "duty = %d goal = %d progress = %.5f",
+        // //         node->duty, node->path->target_duty, node->path->progress);
+        // assert(node->path->target_duty > 0);
+
+        pr( "diff duty = %d, progress = %.5f, duty/time = %f",
+                node->duty - node->last_duty,
+                node->path->progress - node->path->last_progress,
+                (node->duty - node->last_duty) *1E6 / tick);
+        node->last_duty = node->duty;
+        node->path->last_progress = node->path->progress;
 
         if (ret) break;
         if (node->path->progress < 0 || node->path->progress > 1)
@@ -286,8 +275,9 @@ int sweep(tNode *node, int duty_end)
     clock_gettime(CLOCK_REALTIME, &end_time);
     float duration = clock_delta(start_time, end_time);
     float step_duration = duration / step_count;
-    pr("took %d steps in %.2f ms (%.2f ms/step)", 
-            step_count, duration / 1E6, step_duration / 1E6);
+    float ns_per_duty = duration / (node->path->target_duty - node->path->start_duty);
+    pr("took %d steps in %.2f ms (%.2f ms/step), ns_per_duty = %f", 
+            step_count, duration / 1E6, step_duration / 1E6, ns_per_duty);
     if (node->path) {
         free(node->path);
         node->path = NULL;
