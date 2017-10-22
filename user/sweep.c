@@ -25,15 +25,6 @@
 int fd = -1;
 const char *path = "/dev/robot";
 
-typedef enum command {
-    COMMAND_UNKNOWN,
-    CMD_ON,
-    CMD_OFF,
-    CMD_SET,
-    CMD_GET,
-    CMD_SYNC,
-} tCmd;
-
 typedef float (*tPathFunc)(float);
 
 typedef struct path {
@@ -50,19 +41,38 @@ typedef struct node {
     int min_duty;
     int max_duty;
     int duty;
+    int duty_default;
     int last_duty;
     int a;
     int b;
     tPath *path;
 } tNode;
 
-tNode g_node[] = {{   .index = 0, .min_duty = 600000, .max_duty = 2400000, .duty = DEF_DUTY, .a = 10000, .b = 0 },
-                    { .index = 1, .min_duty = 600000, .max_duty = 2600000, .duty = DEF_DUTY, .a = 10000, .b = 0 },
-                    { .index = 2, .min_duty = 600000, .max_duty = 2400000, .duty = DEF_DUTY, .a = 10000, .b = 0 },
-                    { .index = 3, .min_duty = 600000, .max_duty = 2400000, .duty = DEF_DUTY, .a = 10000, .b = 0 },
-                    { .index = 4, .min_duty = 600000, .max_duty = 2400000, .duty = DEF_DUTY, .a = 10000, .b = 0 },
-                    { .index = 5, .min_duty = 1800000, .max_duty = 2400000, .duty = DEF_DUTY, .a = 10000, .b = 0 }};
+tNode g_node[] = {{   .index = 0, .min_duty = 600000,  .max_duty = 2400000, .duty = 0, .duty_default = 600000, .a = 10000, .b = 0 },
+                    { .index = 1, .min_duty = 600000,  .max_duty = 2600000, .duty = 0, .duty_default = 1700000, .a = 10000, .b = 0 },
+                    { .index = 2, .min_duty = 600000,  .max_duty = 2400000, .duty = 0, .duty_default = 800000, .a = 10000, .b = 0 },
+                    { .index = 3, .min_duty = 600000,  .max_duty = 2400000, .duty = 0, .duty_default = 2000000, .a = 10000, .b = 0 },
+                    { .index = 4, .min_duty = 600000,  .max_duty = 2400000, .duty = 0, .duty_default = 1400000, .a = 10000, .b = 0 },
+                    { .index = 5, .min_duty = 1800000, .max_duty = 2400000, .duty = 0, .duty_default = 1800000, .a = 10000, .b = 0 }};
 
+
+typedef enum command {
+    COMMAND_UNKNOWN,
+    CMD_ON,
+    CMD_OFF,
+    CMD_SET,
+    CMD_GET,
+    CMD_SYNC,
+} tCmd;
+
+/* --------------------------------------------------*/
+/* Foward declarations */
+/* --------------------------------------------------*/
+int getDuty(tNode* node);
+
+/* --------------------------------------------------*/
+/* Function definitions */
+/* --------------------------------------------------*/
 float gentle(float in)
 {
     return logf(in);
@@ -78,6 +88,21 @@ float gentle2(float x)
 {
     float s = sinf(8*x/5);
     return s*s;
+}
+
+int initNode(tNode* node)
+{
+    if (!node) return -EINVAL;
+
+    int ret = 0;
+
+    if (0 != (ret = getDuty(node))) {
+        pr("Error %d getting duty: %s", ret, strerror(-ret));
+    } else if (node->duty == 0) {
+        node->duty = node->duty_default;
+    }
+
+    return ret;
 }
 
 int calcNextDuty(tNode* node)
@@ -192,25 +217,7 @@ int setPath(
     path->target_duty = duty_goal;
     path->progress_step = fabs((float)DUTY_STEP / (float)(duty_goal - start_duty));
 
-//    frameDelay->tv_nsec = 2222222;
-#if 0
-    if (abs(duty_start - duty_end) < 100) {
-        return 0;
-    }
-    
-    int duty_delta = duty_goal - duty_start;
-    pr("duty_delta = duty_end (%d) - duty_start(%d) = %d", 
-            duty_goal, duty_start, duty_delta);
-    int num_steps = abs(duty_delta / 3999);
-    pr("num_steps = abs(duty_delta / 3999) = %d", num_steps);
-    pr("progress_step = duty_step / duty_delta = %f", progress_step);
-    float duration = fabs((float)duty_delta / (float)1800);
-    pr("duration = abs(duty_delta / 1800000) = %f", duration);
-    float time_delta = (duration * 1E3);
-    pr("time_delta = (duration * 1E9) = %d", time_delta);
-    int time_step = time_delta  / num_steps;
-    pr("time_step = time_delta  / num_steps = %d", time_step);
-#endif
+    frameDelay->tv_nsec = 5222222;
     //tPath path = { duty_start, duty_goal, 0, NULL };
 
 
@@ -229,10 +236,15 @@ float clock_delta(
     int d_ns = t2.tv_nsec - t1.tv_nsec;
     return d_s ? d_s * 1E9 + d_ns : d_ns;
 }
+
 int sweep(tNode *node, int duty_end)
 {
     int ret = 0;
-    pr("duty_end = %d", duty_end);
+    if (node->duty == 0) {
+        node->duty = node->duty_default;
+    }
+    pr("duty_start = %d duty_end = %d",
+            node->duty, duty_end);
 
     struct timespec delay = { 0 };
 
@@ -317,10 +329,11 @@ int main(int argc, char** argv) {
         pr("Error %d opening %s: %s",
                 fd, path, strerror(fd));
     } else {
-        if (0 != (ret = getDuty(&g_node[index]))) {
-            pr("getDuty returns %d: %s",
+        if (0 != (ret = initNode(&g_node[index]))) {
+            pr("initNode returns %d: %s",
                     -ret, strerror(-ret));
         } else {
+            pr("duty: %d", (g_node[index].duty - g_node[index].b) / g_node[index].a);
             if (setting) {
                 sweep(&g_node[index], duty_end * g_node[index].a + g_node[index].b);
             }
