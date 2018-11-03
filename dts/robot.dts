@@ -1,0 +1,53 @@
+// Definitions for NXP PCA9685A I2C PWM controller on ARM I2C bus.
+/dts-v1/;
+/plugin/;
+
+/{
+	fragment@0 {
+		target = <&i2c_arm>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			status = "okay";
+
+			robo: pca@40 {
+				compatible = "nxp,pca9685";
+				#pwm-cells = <2>;
+				reg = <0x40>;
+				status = "okay";
+			};
+		};
+	};
+	__overrides__ {
+		addr = <&robo>,"reg:0";
+	};
+	fragment@1 {
+        target-path = "/";
+		__overlay__ {
+			base { 
+				pwms = <&robo 0 0x40>;
+				compatible = "servo";
+			};
+			shoulder {
+				pwms = <&robo 2 0x40>;
+				compatible = "servo";
+			};
+			elbow {
+				pwms = <&robo 4 0x40>;
+				compatible = "servo";
+			};
+			wrist1 {
+				pwms = <&robo 6 0x40>;
+				compatible = "servo";
+			};
+			wrist2 {
+				pwms = <&robo 8 0x40>;
+				compatible = "servo";
+			};
+			claw {
+				pwms = <&robo 10 0x40>;
+				compatible = "servo";
+			};
+		};
+	};
+};

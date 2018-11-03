@@ -12,13 +12,13 @@
 #include <time.h> /* struct timespec and nanosleep */
 #include <assert.h>
 
-#include "servo.h"
+#include "../kernel/servo.h"
 
 #define DEF_DUTY 900000
 
 #define pr(fmt, ...) fprintf(stderr, "<%s:%d> " fmt "\n", __func__, __LINE__, ##__VA_ARGS__)
 
-//#define DRY_RUN
+#define DRY_RUN
 //#define DEBUG_PRINT
 
 #define TIMESPEC_COPY(dest,src) do { \
@@ -39,6 +39,7 @@ typedef struct path {
     float last_progress;
     float progress_unit;
     int num_steps;
+    bool done;
     tPathFunc path_func; 
 } tPath;
 
@@ -127,6 +128,10 @@ int calcNextDuty(tNode* node)
         step = delta * node->path->path_func(node->path->progress);
     }
     node->duty = base + step;
+    if (abs(node->path->target_duty - node->duty) > 100) {
+        free(node->path);
+        node->path = NULL;
+    }
     return 0;
 }
 
@@ -135,7 +140,7 @@ int setDuty(tNode* node)
     if (node->duty > node->max_duty) node->duty = node->max_duty;
     if (node->duty < node->min_duty) node->duty = node->min_duty;
     struct servo_ioctl_pkt pkt;
-    //pr("before duty = %d ", node->duty);
+    pr("node %d: duty = %d ", node->index, node->duty);
     memset(&pkt, 0, sizeof(pkt));
     pkt.idx = node->index;
     pkt.duty_ns = node->duty;
@@ -213,19 +218,45 @@ float clock_delta(
     return d_s ? d_s * 1E9 + d_ns : d_ns;
 }
 
-int sweep(tNode *node, int duty_end)
+int getMaxDelta(
+        tNode* nodes[6],
+        int* pMaxDelta)
+{
+    if (!nodes) return -EINVAL;
+
+    int max_delta = 0;
+
+    for (int i = 0; i < 6; i++)
+    {
+        if (!nodes[i]->path) continue;
+
+        int delta = (nodes[i]->path->target_duty - nodes[i]->path->start_duty);
+
+        if (delta > max_delta) max_delta = delta;
+
+    }
+    *pMaxDelta = max_delta;
+    return 0;
+}
+
+int multiSweep(tNode *nodes[6], int duty_end[6])
 {
     int ret = 0;
-    if (node->duty == 0) {
-        node->duty = node->duty_default;
-    }
-    pr("duty_start = %d duty_end = %d",
-            node->duty, duty_end);
+    for (int n = 0; n < 5; n++) {
+        tNode *node = nodes[n];
+        if (!node) continue;
 
-    if (0 != (ret = setPath(&node->path, node->duty, duty_end))) {
-        pr( "error %d calculating params: %s",
-                ret, strerror(-ret));
-        return ret;
+        if (node->duty == 0) {
+            node->duty = node->duty_default;
+        }
+        pr("%d: duty_start = %d duty_end = %d",
+                n, node->duty, duty_end[n]);
+
+        if (0 != (ret = setPath(&node->path, node->duty, duty_end[n]))) {
+            pr( "error %d calculating params: %s",
+                    ret, strerror(-ret));
+            return ret;
+        }
     }
     
 
@@ -236,52 +267,68 @@ int sweep(tNode *node, int duty_end)
     TIMESPEC_COPY(last, start_time);
     
     do {
-        /* Sync */
+        /* Loop Sync */
         clock_gettime(CLOCK_REALTIME, &end_time);
         float tick = clock_delta(last, end_time);
         //pr("%d: %.2f us: progress = %.2f", step_count, tick / 1E3, node->path->progress);
         TIMESPEC_COPY(last, end_time);
-
-
         step_count++;
-        node->path->progress += node->path->progress_unit * tick;
-        calcNextDuty(node);
-        if (0 != (ret = setDuty(node))) {
-            pr( "Error %d setting duty %d for id %d: %s",
-                    ret, node->duty, node->index, strerror(-ret));
-        } else if (0 != (ret = servoSync(node))) {
-            pr( "Error %d syncing for id %d: %s",
-                    ret, node->index, strerror(-ret));
-        }
 
-        // pr( "duty = %d goal = %d progress = %.5f",
-        // //         node->duty, node->path->target_duty, node->path->progress);
-        // assert(node->path->target_duty > 0);
-
-        pr( "diff duty = %d, progress = %.5f, duty/time = %f",
-                node->duty - node->last_duty,
-                node->path->progress - node->path->last_progress,
-                (node->duty - node->last_duty) *1E6 / tick);
-        node->last_duty = node->duty;
-        node->path->last_progress = node->path->progress;
-
-        if (ret) break;
-        if (node->path->progress < 0 || node->path->progress > 1)
+        for (int n = 0; n < 5; n++) 
         {
-            break;
+            /* per node */
+            tNode *node = nodes[n];
+            if (!node || !node->path) continue;
+
+            /* Update progress for this node */
+            node->path->progress += node->path->progress_unit * tick;
+
+            /* Apply new duty to node and update kernel */
+            /* TODO: Should not need to context switch once per node
+             * but that's how the driver is currently written */
+            if (0 != (ret = setDuty(node))) {
+                pr( "Error %d setting duty %d for id %d: %s",
+                        ret, node->duty, node->index, strerror(-ret));
+                break;
+            } else if (0 != (ret = servoSync(node))) {
+                pr( "Error %d syncing for id %d: %s",
+                        ret, node->index, strerror(-ret));
+                break;
+            }
+
+            /* Debug tracking */
+            node->last_duty = node->duty;
+            node->path->last_progress = node->path->progress;
+#if 0
+
+             pr( "duty = %d goal = %d progress = %.5f",
+                      node->duty, node->path->target_duty, node->path->progress);
+             assert(node->path->target_duty > 0);
+
+             pr( "diff duty = %d, progress = %.5f, duty/time = %f",
+                     node->duty - node->last_duty,
+                     node->path->progress - node->path->last_progress,
+                     (node->duty - node->last_duty) *1E6 / tick);
+
+#endif
+
+            /* Calculate new duty based on progress and path function */
+            calcNextDuty(node);
         }
-    } while (abs(node->path->target_duty - node->duty) > 100);
+
+    } while (nodes[0]->path || nodes[1]->path ||
+                nodes[2]->path || nodes[3]->path ||
+                nodes[4]->path || nodes[5]->path);
+    //} while (abs(node->path->target_duty - node->duty) > 100);
 
     clock_gettime(CLOCK_REALTIME, &end_time);
     float duration = clock_delta(start_time, end_time);
     float step_duration = duration / step_count;
-    float ns_per_duty = duration / (node->path->target_duty - node->path->start_duty);
+    int maxDelta = 0;
+    getMaxDelta(nodes, &maxDelta);
+    float ns_per_duty = duration / maxDelta;
     pr("took %d steps in %.2f ms (%.2f ms/step), ns_per_duty = %f", 
             step_count, duration / 1E6, step_duration / 1E6, ns_per_duty);
-    if (node->path) {
-        free(node->path);
-        node->path = NULL;
-    }
 
     return ret;
 }
@@ -311,23 +358,30 @@ int main(int argc, char** argv) {
         setting = true;
     }
 
+    int duty_goals[6] = { 60 * 1E5, 110 * 1E5, 80 * 1E5, 200 * 1E5, 40 *1E5, 180 *1E5};
+
 
     fd = open(path,
             O_WRONLY|O_CREAT|O_TRUNC,
             S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH);
     if (fd < 0) {
         pr("Error %d opening %s: %s",
-                fd, path, strerror(fd));
+                errno, path, strerror(errno));
     } else {
-        if (0 != (ret = initNode(&g_node[index]))) {
-            pr("initNode returns %d: %s",
-                    -ret, strerror(-ret));
-        } else {
-            pr("duty: %d", (g_node[index].duty - g_node[index].b) / g_node[index].a);
-            if (setting) {
-                sweep(&g_node[index], duty_end * g_node[index].a + g_node[index].b);
+        for (int i = 0; i < 5; i++) {
+            if (0 != (ret = initNode(&g_node[i]))) {
+                pr("initNode returns %d: %s",
+                        -ret, strerror(-ret));
+                break;
             }
-            pr("duty: %d", (g_node[index].duty - g_node[index].b) / g_node[index].a);
+        }
+        if (ret == 0) {
+        //    pr("duty: %d", (g_node[index].duty - g_node[index].b) / g_node[index].a);
+            if (setting) {
+                tNode *nodes[] = { &g_node[0], &g_node[1], &g_node[2], &g_node[3], &g_node[4], &g_node[5] };
+                multiSweep(&nodes, &duty_end);
+            }
+        //    pr("duty: %d", (g_node[index].duty - g_node[index].b) / g_node[index].a);
         }
         close(fd);
     }

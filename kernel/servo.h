@@ -21,11 +21,11 @@
 
 #define SERVO_PWM_PERIOD 20000000
 
-#define TOTAL_NODES 6
-
+/* What we want to receive from user space */
 struct servo_ioctl_pkt {
-	int idx;
+	unsigned char idx;
 	int duty_ns;
+    bool enabled;
 };
 
 #endif /* SERVO_H */
