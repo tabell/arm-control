@@ -30,7 +30,7 @@
 int fd = -1;
 const char *path = "/dev/robot";
 
-typedef float (*tPathFunc)(float);
+typedef float (*path_func_t)(float);
 
 typedef struct path {
     int start_duty;
@@ -40,8 +40,8 @@ typedef struct path {
     float progress_unit;
     int num_steps;
     bool done;
-    tPathFunc path_func; 
-} tPath;
+    path_func_t path_func; 
+} path_t;
 
 typedef struct node {
     int index;
@@ -52,10 +52,10 @@ typedef struct node {
     int last_duty;
     int a;
     int b;
-    tPath *path;
-} tNode;
+    path_t *path;
+} node_t;
 
-tNode g_node[] = {{   .index = 0, .min_duty = 600000,  .max_duty = 2400000, .duty = 0, .duty_default = 600000, .a = 10000, .b = 0 },
+node_t g_node[] = {{   .index = 0, .min_duty = 600000,  .max_duty = 2400000, .duty = 0, .duty_default = 600000, .a = 10000, .b = 0 },
                     { .index = 1, .min_duty = 600000,  .max_duty = 2600000, .duty = 0, .duty_default = 1700000, .a = 10000, .b = 0 },
                     { .index = 2, .min_duty = 600000,  .max_duty = 2400000, .duty = 0, .duty_default = 800000, .a = 10000, .b = 0 },
                     { .index = 3, .min_duty = 600000,  .max_duty = 2400000, .duty = 0, .duty_default = 2000000, .a = 10000, .b = 0 },
@@ -70,12 +70,12 @@ typedef enum command {
     CMD_SET,
     CMD_GET,
     CMD_SYNC,
-} tCmd;
+} cmd_t;
 
 /* --------------------------------------------------*/
 /* Foward declarations */
 /* --------------------------------------------------*/
-int getDuty(tNode* node);
+int get_duty(node_t* node);
 
 /* --------------------------------------------------*/
 /* Function definitions */
@@ -97,13 +97,13 @@ float gentle2(float x)
     return s*s;
 }
 
-int initNode(tNode* node)
+int ininode_t(node_t* node)
 {
     if (!node) return -EINVAL;
 
     int ret = 0;
 
-    if (0 != (ret = getDuty(node))) {
+    if (0 != (ret = get_duty(node))) {
         pr("Error %d getting duty: %s", ret, strerror(-ret));
     } else if (node->duty == 0) {
         node->duty = node->duty_default;
@@ -112,7 +112,7 @@ int initNode(tNode* node)
     return ret;
 }
 
-int calcNextDuty(tNode* node)
+int calc_next_duty(node_t* node)
 {
     if (!node || !node->path) {
         return -EINVAL;
@@ -135,7 +135,7 @@ int calcNextDuty(tNode* node)
     return 0;
 }
 
-int setDuty(tNode* node)
+int set_duty(node_t* node)
 {
     if (node->duty > node->max_duty) node->duty = node->max_duty;
     if (node->duty < node->min_duty) node->duty = node->min_duty;
@@ -153,7 +153,7 @@ int setDuty(tNode* node)
     return 0;
 }
 
-int getDuty(tNode* node)
+int get_duty(node_t* node)
 {
     struct servo_ioctl_pkt pkt;
     memset(&pkt, 0, sizeof(pkt));
@@ -168,7 +168,7 @@ int getDuty(tNode* node)
 
 }
 
-int servoSync(tNode* node)
+int servo_sync(node_t* node)
 {
     struct servo_ioctl_pkt pkt;
     memset(&pkt, 0, sizeof(pkt));
@@ -184,14 +184,14 @@ int servoSync(tNode* node)
 
 }
 
-int setPath(
-        tPath** pPath,
+int sepath_t(
+        path_t** pPath,
         int start_duty,
         int duty_goal)
 {
     if (!path) return -EINVAL;
-    tPath *path = NULL;
-    if (NULL == (path = malloc(sizeof(tPath)))) {
+    path_t *path = NULL;
+    if (NULL == (path = malloc(sizeof(path_t)))) {
         pr( "couldn't allocate memory for path struct");
         return -ENOMEM;
     }
@@ -218,8 +218,8 @@ float clock_delta(
     return d_s ? d_s * 1E9 + d_ns : d_ns;
 }
 
-int getMaxDelta(
-        tNode* nodes[6],
+int get_max_delta(
+        node_t* nodes[6],
         int* pMaxDelta)
 {
     if (!nodes) return -EINVAL;
@@ -239,11 +239,11 @@ int getMaxDelta(
     return 0;
 }
 
-int multiSweep(tNode *nodes[6], int duty_end[6])
+int multi_sweep(node_t *nodes[6], int duty_end[6])
 {
     int ret = 0;
     for (int n = 0; n < 5; n++) {
-        tNode *node = nodes[n];
+        node_t *node = nodes[n];
         if (!node) continue;
 
         if (node->duty == 0) {
@@ -252,7 +252,7 @@ int multiSweep(tNode *nodes[6], int duty_end[6])
         pr("%d: duty_start = %d duty_end = %d",
                 n, node->duty, duty_end[n]);
 
-        if (0 != (ret = setPath(&node->path, node->duty, duty_end[n]))) {
+        if (0 != (ret = sepath_t(&node->path, node->duty, duty_end[n]))) {
             pr( "error %d calculating params: %s",
                     ret, strerror(-ret));
             return ret;
@@ -277,7 +277,7 @@ int multiSweep(tNode *nodes[6], int duty_end[6])
         for (int n = 0; n < 5; n++) 
         {
             /* per node */
-            tNode *node = nodes[n];
+            node_t *node = nodes[n];
             if (!node || !node->path) continue;
 
             /* Update progress for this node */
@@ -286,11 +286,11 @@ int multiSweep(tNode *nodes[6], int duty_end[6])
             /* Apply new duty to node and update kernel */
             /* TODO: Should not need to context switch once per node
              * but that's how the driver is currently written */
-            if (0 != (ret = setDuty(node))) {
+            if (0 != (ret = set_duty(node))) {
                 pr( "Error %d setting duty %d for id %d: %s",
                         ret, node->duty, node->index, strerror(-ret));
                 break;
-            } else if (0 != (ret = servoSync(node))) {
+            } else if (0 != (ret = servo_sync(node))) {
                 pr( "Error %d syncing for id %d: %s",
                         ret, node->index, strerror(-ret));
                 break;
@@ -313,7 +313,7 @@ int multiSweep(tNode *nodes[6], int duty_end[6])
 #endif
 
             /* Calculate new duty based on progress and path function */
-            calcNextDuty(node);
+            calc_next_duty(node);
         }
 
     } while (nodes[0]->path || nodes[1]->path ||
@@ -325,7 +325,7 @@ int multiSweep(tNode *nodes[6], int duty_end[6])
     float duration = clock_delta(start_time, end_time);
     float step_duration = duration / step_count;
     int maxDelta = 0;
-    getMaxDelta(nodes, &maxDelta);
+    get_max_delta(nodes, &maxDelta);
     float ns_per_duty = duration / maxDelta;
     pr("took %d steps in %.2f ms (%.2f ms/step), ns_per_duty = %f", 
             step_count, duration / 1E6, step_duration / 1E6, ns_per_duty);
@@ -369,8 +369,8 @@ int main(int argc, char** argv) {
                 errno, path, strerror(errno));
     } else {
         for (int i = 0; i < 5; i++) {
-            if (0 != (ret = initNode(&g_node[i]))) {
-                pr("initNode returns %d: %s",
+            if (0 != (ret = ininode_t(&g_node[i]))) {
+                pr("ininode_t returns %d: %s",
                         -ret, strerror(-ret));
                 break;
             }
@@ -378,8 +378,8 @@ int main(int argc, char** argv) {
         if (ret == 0) {
         //    pr("duty: %d", (g_node[index].duty - g_node[index].b) / g_node[index].a);
             if (setting) {
-                tNode *nodes[] = { &g_node[0], &g_node[1], &g_node[2], &g_node[3], &g_node[4], &g_node[5] };
-                multiSweep(&nodes, &duty_end);
+                node_t *nodes[] = { &g_node[0], &g_node[1], &g_node[2], &g_node[3], &g_node[4], &g_node[5] };
+                multi_sweep(nodes, &duty_end);
             }
         //    pr("duty: %d", (g_node[index].duty - g_node[index].b) / g_node[index].a);
         }
